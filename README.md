@@ -17,6 +17,12 @@ Start with an IP Webcam MJPEG stream:
 PORT=8000 python server.py http://PHONE_IP:8080/video
 ```
 
+Or use the computer's local webcam (`0` is the first camera):
+
+```bash
+PORT=8000 python server.py 0
+```
+
 Open http://localhost:8000.
 
 The DeepLabv3 model weights download automatically on first start. CUDA is

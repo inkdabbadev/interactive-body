@@ -3,7 +3,7 @@
 Usage: python3 server.py [camera_url]
 Default camera: http://192.168.1.117:8080/video   (IP Webcam app's MJPEG stream)
 """
-import os, sys, ssl, urllib.request
+import os, sys, ssl, urllib.request, threading
 import cv2
 import numpy as np
 import torch
@@ -16,6 +16,9 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 CAM = sys.argv[1] if len(sys.argv) > 1 else "http://192.168.1.117:8080/video"
 PORT = int(os.environ.get("PORT", sys.argv[2] if len(sys.argv) > 2 else "8000"))
+LOCAL_CAMERA = CAM.isdigit()
+LOCAL_CAP = cv2.VideoCapture(int(CAM)) if LOCAL_CAMERA else None
+LOCAL_LOCK = threading.Lock()
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 WEIGHTS = DeepLabV3_ResNet101_Weights.DEFAULT
 MODEL = deeplabv3_resnet101(weights=WEIGHTS).to(DEVICE).eval()
@@ -53,6 +56,10 @@ def make_deeplab_mask(frame):
     return mask
 
 def read_camera_frame():
+    if LOCAL_CAMERA:
+        with LOCAL_LOCK:
+            ok, frame = LOCAL_CAP.read()
+        return frame if ok else None
     r = urllib.request.urlopen(CAM, timeout=10, context=ctx)
     data = b""
     while len(data) < 2_000_000:
