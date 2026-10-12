@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Webcam Particle Field</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);background:#000;color:#cfd8dc}
+html,body{height:100%;margin:0;background:#000;overflow:hidden;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
+#crackCanvas{pointer-events:none;z-index:5}
+#ui{position:fixed;left:0;right:0;bottom:0;padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:center;font-size:13px;pointer-events:none}
+#ui>*{pointer-events:auto}
+button{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:7px 14px;font-size:13px;cursor:pointer;backdrop-filter:blur(6px)}
+button:hover{background:rgba(255,255,255,.2)}
+#hint{opacity:.6}
+video{display:none}
+</style>
+</head>
+<body>
+<canvas id="crackCanvas"></canvas>
+<video id="video" autoplay playsinline muted></video>
+<div id="ui">
+  <span id="hint">YOLO mask: starting…</span>
+  <button id="cam">Use laptop webcam</button>
+  <button id="mode">Colour: webcam</button>
+  <button id="dens">Density: high</button>
+  <button id="shape">Shape: particles</button>
+  <button id="style">Style: white balls</button>
+</div>
+<script src="/three.min.js"></script>
+<script>
+(function(){
+const renderer = new THREE.WebGLRenderer({antialias:false, powerPreference:"high-performance"});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+const crackCanvas = document.getElementById("crackCanvas");
+const crackCtx = crackCanvas.getContext("2d");
+let cracks = [];
+let blossoms = [];
+function resizeCrackCanvas(){
+  const dpr = Math.min(devicePixelRatio, 2);
+  crackCanvas.width = innerWidth * dpr; crackCanvas.height = innerHeight * dpr;
+  crackCanvas.style.width = innerWidth + "px"; crackCanvas.style.height = innerHeight + "px";
+  crackCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizeCrackCanvas();
+function makeCrack(x,y){
+  const count=18+Math.floor(Math.random()*9);
+  for(let i=0;i<count;i++){
+    const angle=i/count*Math.PI*2+(Math.random()-.5)*.22, length=100+Math.random()*300;
+    const points=[{x,y}]; let px=x, py=y;
+    for(let s=0;s<7;s++){
+      const bend=(Math.random()-.5)*.65, step=length/7;
+      px+=Math.cos(angle+bend)*step; py+=Math.sin(angle+bend)*step;
+      points.push({x:px,y:py});
+    }
+    cracks.push({points,life:1,width:.25+Math.random()*2.0});
+    // Short side fractures branching from the main crack.
+    if(Math.random()<.8){
+      const branchIndex=2+Math.floor(Math.random()*3), base=points[branchIndex];
+      const branchAngle=angle+(Math.random()<.5?-1:1)*(.35+Math.random()*.8);
+      const branchLength=35+Math.random()*110;
+      cracks.push({points:[base,{x:base.x+Math.cos(branchAngle)*branchLength,y:base.y+Math.sin(branchAngle)*branchLength}],life:.85,width:.2+Math.random()*.9});
+    }
+  }
+  // Broken concentric rings give the impact a spiderweb-glass pattern.
+  for(let ring=0;ring<3;ring++){
+    const radius=55+ring*75+Math.random()*20, points=[];
+    const start=Math.random()*.6, sweep=4.2+Math.random()*1.5;
+    for(let s=0;s<18;s++){
+      const a=start+s/17*sweep, r=radius+(Math.random()-.5)*12;
+      points.push({x:x+Math.cos(a)*r,y:y+Math.sin(a)*r});
+    }
+    cracks.push({points,life:.9,width:.25+Math.random()*1.4});
+  }
+}
+function drawCracks(){
+  crackCtx.clearRect(0,0,innerWidth,innerHeight);
+  for(let i=blossoms.length-1;i>=0;i--){
+    const b=blossoms[i];
+    b.x+=b.vx; b.y+=b.vy; b.vy+=.018; b.rotation+=b.spin; b.life-=.018;
+    crackCtx.save(); crackCtx.translate(b.x,b.y); crackCtx.rotate(b.rotation);
+    crackCtx.globalAlpha=Math.max(0,b.life)*.8;
+    crackCtx.fillStyle=b.color; crackCtx.beginPath();
+    crackCtx.ellipse(0,0,b.size,b.size*.55,0,0,Math.PI*2); crackCtx.fill(); crackCtx.restore();
+    if(b.life<=0) blossoms.splice(i,1);
+  }
+  for(let i=cracks.length-1;i>=0;i--){
+    const c=cracks[i]; crackCtx.beginPath(); crackCtx.moveTo(c.points[0].x,c.points[0].y);
+    c.points.slice(1).forEach(p=>crackCtx.lineTo(p.x,p.y));
+    crackCtx.strokeStyle=`rgba(20,35,65,${c.life*.8})`; crackCtx.lineWidth=c.width; crackCtx.stroke();
+    c.life-=.025; if(c.life<=0) cracks.splice(i,1);
+  }
+  requestAnimationFrame(drawCracks);
+}
+drawCracks();
+function makeBlossoms(x,y){
+  for(let i=0;i<2;i++) blossoms.push({
+    x:x+(Math.random()-.5)*8, y:y+(Math.random()-.5)*8,
+    vx:(Math.random()-.5)*1.2, vy:-.3+Math.random()*.7,
+    size:4+Math.random()*5, rotation:Math.random()*6.28,
+    spin:(Math.random()-.5)*.12, life:.8+Math.random()*.5,
+    color:Math.random()<.65 ? "#ff4f91" : "#ffffff"
+  });
+}
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xffffff);
+const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 100);
+camera.position.z = 11;
+
+// ---- video source (webcam, with animated fallback) ----
+const video = document.getElementById("video");
+const fb = document.createElement("canvas"); fb.width = 320; fb.height = 180;
+const fbc = fb.getContext("2d");
+const fbTex = new THREE.CanvasTexture(fb);
+const vidTex = new THREE.VideoTexture(video);
+let useCam = false, useIP = false;
+const ipImg = new Image();
+const ipCan = document.createElement("canvas"); ipCan.width = 640; ipCan.height = 360;
+const ipCtx = ipCan.getContext("2d");
+const ipTex = new THREE.CanvasTexture(ipCan);
+const maskCan = document.createElement("canvas"); maskCan.width = 640; maskCan.height = 360;
+const maskCtx = maskCan.getContext("2d");
+const maskTex = new THREE.CanvasTexture(maskCan);
+maskTex.minFilter = THREE.LinearFilter; maskTex.magFilter = THREE.LinearFilter;
+const yoloMaskImg = new Image();
+let yoloMaskLoading = false;
+let yoloMaskReady = false;
+let yoloMaskNext = 0;
+yoloMaskImg.onload = () => {
+  maskCtx.clearRect(0, 0, 640, 360);
+  maskCtx.drawImage(yoloMaskImg, 0, 0, 640, 360);
+  maskTex.needsUpdate = true;
+  yoloMaskLoading = false;
+  yoloMaskNext = performance.now() + 400;
+  yoloMaskReady = true;
+  document.getElementById("hint").textContent = "YOLO human mask active · move to repel · click to burst";
+};
+yoloMaskImg.onerror = () => {
+  yoloMaskLoading = false;
+  yoloMaskNext = performance.now() + 500;
+  document.getElementById("hint").textContent = "YOLO mask unavailable — retrying…";
+};
+function startIP(){
+  useCam = false; useIP = true;
+  ipImg.onload = ()=>{ uniforms.tVideo.value = ipTex;
+     document.getElementById("cam").textContent = "Use laptop webcam"; };
+  ipImg.onerror = ()=>{ useIP = false; document.getElementById("cam").textContent = "IP cam failed — try webcam"; startCam(); };
+  ipImg.src = "/snapshot?" + Date.now();
+}
+
+function drawFallback(t){
+  fbc.fillStyle = "#000"; fbc.fillRect(0,0,320,180);
+  for(let i=0;i<5;i++){
+    const x = 160 + Math.sin(t*.6 + i*1.7)*110, y = 90 + Math.cos(t*.8 + i*2.3)*60;
+    const g = fbc.createRadialGradient(x,y,2,x,y,50);
+    g.addColorStop(0,`hsl(${(t*40+i*70)%360},90%,65%)`); g.addColorStop(1,"rgba(0,0,0,0)");
+    fbc.fillStyle = g; fbc.fillRect(0,0,320,180);
+  }
+  fbTex.needsUpdate = true;
+}
+
+async function startCam(){
+  try{
+    const s = await navigator.mediaDevices.getUserMedia({video:{width:640,height:360,facingMode:"user"}});
+    video.srcObject = s; await video.play();
+    useCam = true; useIP = false; ipImg.src = ""; uniforms.tVideo.value = vidTex;
+    document.getElementById("cam").textContent = "Use IP cam";
+  }catch(e){
+    useCam = false; uniforms.tVideo.value = fbTex;
+    document.getElementById("cam").textContent = "Camera unavailable — retry";
+  }
+}
+
+// ---- shaders ----
+const uniforms = {
+  tVideo:{value:fbTex}, tMask:{value:maskTex}, uMaskTexel:{value:new THREE.Vector2(1/640,1/360)}, uTime:{value:0}, uMouse:{value:new THREE.Vector2(99,99)},
+  uBurst:{value:0}, uSize:{value:1.0}, uMode:{value:0}, uShape:{value:1}, uTheme:{value:0}, uPx:{value:renderer.getPixelRatio()}
+};
+const vert = `
+ uniform sampler2D tVideo, tMask; uniform float uTime, uBurst, uSize, uPx, uMode, uShape, uTheme; uniform vec2 uMouse, uMaskTexel;
+attribute vec2 aUv; attribute float aRnd;
+ varying vec3 vCol; varying float vL, vEdge, vRnd;
+vec3 hsv(vec3 c){vec4 K=vec4(1.,2./3.,1./3.,3.);vec3 p=abs(fract(c.xxx+K.xyz)*6.-K.www);return c.z*mix(K.xxx,clamp(p-K.xxx,0.,1.),c.y);}
+void main(){
+   float human = texture2D(tMask, vec2(1.0-aUv.x, aUv.y)).r;
+   if(human < .45){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
+   vec2 maskUv = vec2(1.0-aUv.x, aUv.y);
+   float nearMask = min(
+     min(texture2D(tMask, maskUv + vec2(uMaskTexel.x, 0.0)).r,
+         texture2D(tMask, maskUv - vec2(uMaskTexel.x, 0.0)).r),
+     min(texture2D(tMask, maskUv + vec2(0.0, uMaskTexel.y)).r,
+         texture2D(tMask, maskUv - vec2(0.0, uMaskTexel.y)).r));
+    float edge = 1.0 - nearMask;
+    // Blue particle style uses uniform dots; only white-ball style gets
+    // the emphasized contour treatment.
+    float visualEdge = uTheme > .5 ? 0.0 : edge;
+   // The camera is used only for the segmentation mask. Do not copy its
+   // brightness or visual details into the particle silhouette.
+   float l = .72;
+   vL = 1.0;
+   vec3 p = vec3((aUv.x-.5)*16., (aUv.y-.5)*9., 0.0);
+   float dust = 1.0;
+   float ph = aRnd*6.2831 + uTime*(.3+aRnd);
+   p += vec3(sin(ph), cos(ph*1.3), sin(ph*.7))*dust*(.015+aRnd*.08);
+   p.z += (aRnd-.5)*(.7 + uShape*1.4);
+   p.y += sin(uTime*1.5 + aRnd*6.28) * uShape * .025;
+   // Click crack: split particles along sharp radial fracture rays.
+   vec2 fromClick = p.xy - uMouse;
+   float clickAngle = atan(fromClick.y, fromClick.x);
+   float crackRay = pow(abs(sin(clickAngle * 13.0 + aRnd * 4.0)), 26.0);
+   float crackLength = exp(-length(fromClick) * .055);
+   p.xy += normalize(fromClick + vec2(.0001)) * crackRay * crackLength * uBurst * 2.8;
+   p.z += crackRay * uBurst * 2.0;
+   // Keep particles visible even when the camera image has dark pixels.
+   // Brightness still controls depth and dust motion, but never the existence
+   // of the particle itself.
+   // A clean shape-only particle color; no camera image detail.
+    vec3 col = uTheme > .5
+      ? vec3(.0, .38 + aRnd * .38, .92 + aRnd * .08)
+      : vec3(.95, .9, .72);
+    if(uShape > .5 && uTheme < .5){
+      col = hsv(vec3(fract(aRnd * 9.73 + aUv.x * .17), .78, .88));
+    }
+   if(uMode>.5) col = hsv(vec3(fract(l*.8+uTime*.05+aUv.x*.2), .75, .9));
+     vCol = mix(col, vec3(1.0), visualEdge * .38);
+     vEdge = visualEdge;
+     vRnd = aRnd;
+  vec4 mv = modelViewMatrix*vec4(p,1.);
+    float shapeScale = uShape < .5 ? 1.0 :
+       (uShape < 1.5 ? (.12 + aRnd * .72) : (1.0 + aRnd * 2.5));
+    if(uTheme > .5) shapeScale = .07 + aRnd * .25;
+     float edgeScale = 1.0 + visualEdge * 1.5;
+    gl_PointSize = max(1.0, uSize*uPx*(1.8+l*1.8)*shapeScale*edgeScale*(10./-mv.z));
+  gl_Position = projectionMatrix*mv;
+}`;
+const frag = `
+  uniform float uShape, uBurst, uTheme;
+   varying vec3 vCol; varying float vL, vEdge, vRnd;
+ void main(){
+    vec2 q = gl_PointCoord-.5;
+    if(uShape > 1.5){
+      q.x /= (.52 + fract(vRnd * 5.7) * .28);
+      q.y *= 1.08;
+    }
+    float d = length(q);
+   if(d>.5) discard;
+   float a = smoothstep(.5,.10,d);
+    if(uShape > .5 && uTheme < .5){
+     // Turn the point sprite into a lit sphere.
+     vec3 normal = normalize(vec3(q.x * 2.0, q.y * 2.0, sqrt(max(.001, 1.0 - d*d*4.0))));
+     vec3 light = normalize(vec3(-.45, .65, 1.0));
+     float diffuse = .38 + max(dot(normal, light), 0.0) * .62;
+      float specular = pow(max(dot(reflect(-light, normal), vec3(0.0, 0.0, 1.0)), 0.0), 48.0);
+      float rim = pow(1.0 - max(normal.z, 0.0), 2.0) * .08;
+      vec3 glossy = vCol * diffuse + vec3(1.0) * specular * .35 + vCol * rim;
+       vec3 edgeGlow = vec3(.15, .75, 1.0) * vEdge * smoothstep(.5, .08, d) * .8;
+       edgeGlow += vec3(1.0) * uBurst * .35;
+       gl_FragColor = vec4(min(vec3(1.0), glossy + edgeGlow), a*.92);
+     } else {
+      vec3 edgeGlow = vec3(.15, .75, 1.0) * vEdge * .8 + vec3(1.0) * uBurst * .35;
+      gl_FragColor = vec4(min(vec3(1.0), vCol + edgeGlow), a*.9);
+   }
+}`;
+const mat = new THREE.ShaderMaterial({uniforms, vertexShader:vert, fragmentShader:frag,
+  transparent:true, depthWrite:false, blending:THREE.NormalBlending});
+
+// ---- particle grid ----
+let points;
+ const levels = {low:[220,124], med:[340,191], high:[460,259], max:[580,326]};
+  const order = ["low","med","high","max"]; let lvl = 1;
+function build(){
+  if(points){ scene.remove(points); points.geometry.dispose(); }
+  const [w,h] = levels[order[lvl]]; const n = w*h;
+  const uv = new Float32Array(n*2), rnd = new Float32Array(n), pos = new Float32Array(n*3);
+  let k=0;
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    uv[k*2]=x/(w-1); uv[k*2+1]=y/(h-1); rnd[k]=Math.random(); k++;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(pos,3));
+  g.setAttribute("aUv", new THREE.BufferAttribute(uv,2));
+  g.setAttribute("aRnd", new THREE.BufferAttribute(rnd,1));
+  points = new THREE.Points(g, mat); points.frustumCulled = false; scene.add(points);
+  uniforms.uSize.value = 480/w*1.0;
+  document.getElementById("dens").textContent = "Density: " + order[lvl] + " (" + (n/1000|0) + "k)";
+}
+build();
+
+// ---- interaction ----
+const target = new THREE.Vector2(), look = new THREE.Vector2();
+function setMouse(cx,cy){
+  const nx = cx/innerWidth*2-1, ny = -(cy/innerHeight*2-1);
+  target.set(nx,ny);
+  const h = Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.position.z;
+  uniforms.uMouse.value.set(nx*h*camera.aspect, ny*h);
+}
+let crackHoldTimer=null;
+let crackHoldPoint=null;
+let crackHoldButton=null;
+addEventListener("pointermove", e=>{
+  setMouse(e.clientX,e.clientY);
+  if(crackHoldButton===2 && crackHoldPoint &&
+     Math.hypot(e.clientX-crackHoldPoint.x,e.clientY-crackHoldPoint.y)>14){
+    cancelCrackHold();
+  }
+  if(e.target.tagName!=="BUTTON") makeBlossoms(e.clientX,e.clientY);
+});
+addEventListener("pointerdown", e=>{
+  if(e.target.tagName==="BUTTON" || (e.button!==0 && e.button!==2)) return;
+  setMouse(e.clientX,e.clientY);
+  if(e.button===0) uniforms.uBurst.value = 1;
+  crackHoldPoint={x:e.clientX,y:e.clientY};
+  crackHoldButton=e.button;
+  crackHoldTimer=setTimeout(()=>{
+    if(crackHoldPoint && (crackHoldButton!==2 || !crackHoldPoint.moved)){
+      makeCrack(crackHoldPoint.x,crackHoldPoint.y); uniforms.uBurst.value=1;
+    }
+  },500);
+});
+function cancelCrackHold(){
+  if(crackHoldTimer){ clearTimeout(crackHoldTimer); crackHoldTimer=null; }
+  crackHoldPoint=null;
+  crackHoldButton=null;
+}
+addEventListener("pointerup", cancelCrackHold);
+addEventListener("pointercancel", cancelCrackHold);
+addEventListener("contextmenu", e=>e.preventDefault());
+document.getElementById("cam").onclick = ()=>{ if(useIP) startCam(); else startIP(); };
+document.getElementById("mode").onclick = e=>{
+  uniforms.uMode.value = 1-uniforms.uMode.value;
+  e.target.textContent = "Colour: " + (uniforms.uMode.value? "spectrum":"webcam");
+};
+document.getElementById("dens").onclick = ()=>{ lvl=(lvl+1)%order.length; build(); };
+const shapeNames = ["particles", "balls", "balloons"];
+let shapeIndex = 1;
+document.getElementById("shape").textContent = "Shape: balls";
+function cycleShape(){
+  shapeIndex = (shapeIndex + 1) % shapeNames.length;
+  uniforms.uShape.value = shapeIndex;
+  document.getElementById("shape").textContent = "Shape: " + shapeNames[shapeIndex];
+}
+document.getElementById("shape").onclick = cycleShape;
+let nightStyle = false;
+function setStyle(night){
+  nightStyle = night;
+  uniforms.uTheme.value = night ? 1 : 0;
+  uniforms.uMode.value = 0;
+  lvl = night ? 2 : 1;
+  build();
+  scene.background.set(night ? 0x000005 : 0xffffff);
+  if(night){
+    shapeIndex = 0; uniforms.uShape.value = 0;
+    document.getElementById("shape").textContent = "Shape: particles";
+    document.getElementById("style").textContent = "Style: blue particles";
+  } else {
+    shapeIndex = 1; uniforms.uShape.value = 1;
+    document.getElementById("shape").textContent = "Shape: balls";
+    document.getElementById("style").textContent = "Style: white balls";
+  }
+}
+document.getElementById("style").onclick = ()=>setStyle(!nightStyle);
+addEventListener("keydown", e => {
+  if(e.key.toLowerCase() === "p") { shapeIndex = 0; uniforms.uShape.value = 0; document.getElementById("shape").textContent = "Shape: particles"; }
+  if(e.key.toLowerCase() === "b") { shapeIndex = 1; uniforms.uShape.value = 1; document.getElementById("shape").textContent = "Shape: balls"; }
+  if(e.key.toLowerCase() === "v") { shapeIndex = 2; uniforms.uShape.value = 2; document.getElementById("shape").textContent = "Shape: balloons"; }
+  if(e.key.toLowerCase() === "n") setStyle(true);
+  if(e.key.toLowerCase() === "w") setStyle(false);
+});
+addEventListener("resize", ()=>{
+  renderer.setSize(innerWidth,innerHeight); camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  resizeCrackCanvas();
+});
+
+// ---- loop ----
+const clock = new THREE.Clock();
+function frame(){
+  const t = clock.getElapsedTime();
+  uniforms.uTime.value = t;
+  if(useIP && ipImg.complete && ipImg.naturalWidth){
+    ipCtx.drawImage(ipImg,0,0,640,360); ipTex.needsUpdate = true;
+    if(!ipImg.dataset.loading){
+      ipImg.dataset.loading = "1";
+      setTimeout(()=>{ ipImg.dataset.loading = ""; ipImg.src = "/snapshot?" + Date.now(); }, 140);
+    }
+  }
+  // YOLO provides the stronger person-only mask through the local server.
+  if(!yoloMaskLoading && performance.now() >= yoloMaskNext){
+    yoloMaskLoading = true;
+    yoloMaskImg.src = "/deeplab-mask?" + Date.now();
+  }
+  else if(!useCam) drawFallback(t);
+  uniforms.uBurst.value *= 0.93;
+  look.lerp(target, .05);
+  camera.position.x = look.x*1.2; camera.position.y = look.y*.7; camera.lookAt(0,0,0);
+  renderer.render(scene,camera);
+  requestAnimationFrame(frame);
+}
+frame();
+startIP();
+})();
+</script>
+</body>
+</html>
